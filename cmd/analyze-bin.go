@@ -128,6 +128,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	errLog := logrusr.New(logrusErrLog)
 
 	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	analyzeLog.Info("running source analysis")
 	labelSelectors := a.getLabelSelector()
 
 	selectors := []engine.RuleSelector{}
@@ -977,8 +978,11 @@ func (a *analyzeCommand) GenerateStaticReportContainerless(ctx context.Context) 
 	if err != nil {
 		return err
 	}
+	analysisLogPath := filepath.Join(a.output, "analysis.log")
+	fmt.Fprintf(os.Stderr, "\nDetailed logs: %s\n", analysisLogPath)
+
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	fmt.Fprintf(os.Stderr, "\nStatic report created. Access it at this URL:\n  %s\n", string(uri))
+	fmt.Fprintf(os.Stderr, "Static report created. Access it at this URL:\n  %s\n", string(uri))
 
 	return nil
 }
