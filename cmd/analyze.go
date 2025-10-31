@@ -1179,9 +1179,10 @@ func (a *analyzeCommand) RunAnalysis(ctx context.Context, volName string) error 
 	}
 	defer analysisLog.Close()
 
-	a.log.Info("running source code analysis", "log", analysisLogFilePath,
+	a.log.V(1).Info("running source code analysis", "log", analysisLogFilePath,
 		"input", a.input, "output", a.output, "args", strings.Join(args, " "), "volumes", volumes)
-	a.log.Info("generating analysis log in file", "file", analysisLogFilePath)
+
+	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
 
 	var networkName string
 	if !a.needsBuiltin {
@@ -1196,8 +1197,8 @@ func (a *analyzeCommand) RunAnalysis(ctx context.Context, volName string) error 
 		container.WithImage(Settings.RunnerImage),
 		container.WithLog(a.log.V(1)),
 		container.WithVolumes(volumes),
-		container.WithStdout(analysisLog),
-		container.WithStderr(analysisLog),
+		container.WithStdout(analysisLog, os.Stderr),
+		container.WithStderr(analysisLog, os.Stderr),
 		container.WithName(fmt.Sprintf("analyzer-%v", container.RandomName())),
 		container.WithEntrypointArgs(args...),
 		container.WithEntrypointBin("/usr/local/bin/konveyor-analyzer"),
@@ -1361,7 +1362,7 @@ func (a *analyzeCommand) GenerateStaticReport(ctx context.Context) error {
 	staticReportCmd := []string{joinedArgs}
 
 	c := container.NewContainer()
-	a.log.Info("generating static report",
+	a.log.V(1).Info("generating static report",
 		"output", a.output, "args", strings.Join(staticReportCmd, " "))
 	err := c.Run(
 		ctx,
@@ -1377,8 +1378,12 @@ func (a *analyzeCommand) GenerateStaticReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	analysisLogPath := filepath.Join(a.output, "analysis.log")
+	fmt.Fprintf(os.Stderr, "\nDetailed logs: %s\n", analysisLogPath)
+
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	a.log.Info("Static report created. Access it at this URL:", "URL", string(uri))
+	fmt.Fprintf(os.Stderr, "Static report created. Access it at this URL:\n  %s\n", string(uri))
 
 	return nil
 }
@@ -1828,9 +1833,10 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 	}
 	defer analysisLog.Close()
 
-	a.log.Info("running source code analysis", "log", analysisLogFilePath,
+	a.log.V(1).Info("running source code analysis", "log", analysisLogFilePath,
 		"input", a.input, "output", a.output, "args", strings.Join(args, " "), "volumes", volumes)
-	a.log.Info("generating analysis log in file", "file", analysisLogFilePath)
+
+	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
 
 	c := container.NewContainer()
 	err = c.Run(
@@ -1839,8 +1845,8 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 		container.WithLog(a.log.V(1)),
 		container.WithVolumes(volumes),
 		container.WithName(fmt.Sprintf("analyzer-%v", container.RandomName())),
-		container.WithStdout(analysisLog),
-		container.WithStderr(analysisLog),
+		container.WithStdout(analysisLog, os.Stderr),
+		container.WithStderr(analysisLog, os.Stderr),
 		container.WithEntrypointArgs(args...),
 		container.WithEntrypointBin(`C:\app\konveyor-analyzer.exe`),
 		container.WithNetwork(networkName),
@@ -1890,7 +1896,7 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 	}
 
 	//staticReportContainer := container.NewContainer()
-	a.log.Info("generating static report", "output", a.output, "args", staticReportArgs)
+	a.log.V(1).Info("generating static report", "output", a.output, "args", staticReportArgs)
 	err = container.NewContainer().Run(
 		ctx,
 		container.WithImage(Settings.RunnerImage),
@@ -1905,8 +1911,11 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 		return err
 	}
 
+	analysisLogPath := filepath.Join(a.output, "analysis.log")
+	fmt.Fprintf(os.Stderr, "\nDetailed logs: %s\n", analysisLogPath)
+
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	a.log.Info("Static report created. Access it at this URL:", "URL", string(uri))
+	fmt.Fprintf(os.Stderr, "Static report created. Access it at this URL:\n  %s\n", string(uri))
 
 	return nil
 }
