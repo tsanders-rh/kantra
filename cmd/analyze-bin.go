@@ -28,6 +28,7 @@ import (
 	"github.com/konveyor/analyzer-lsp/output/v1/konveyor"
 	outputv1 "github.com/konveyor/analyzer-lsp/output/v1/konveyor"
 	"github.com/konveyor/analyzer-lsp/parser"
+	"github.com/konveyor/analyzer-lsp/progress"
 	"github.com/konveyor/analyzer-lsp/provider"
 	"github.com/konveyor/analyzer-lsp/provider/lib"
 	"github.com/konveyor/analyzer-lsp/tracing"
@@ -57,6 +58,26 @@ func (hook *ConsoleHook) Fire(entry *logrus.Entry) error {
 
 func (hook *ConsoleHook) Levels() []logrus.Level {
 	return logrus.AllLevels
+}
+
+// renderProgressBar renders a visual progress bar to stderr
+func renderProgressBar(percent int, current, total int, message string) {
+	const barWidth = 25
+	filled := (percent * barWidth) / 100
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+	// Truncate message if too long
+	maxMessageLen := 40
+	if len(message) > maxMessageLen {
+		message = message[:maxMessageLen-3] + "..."
+	}
+
+	// Use \r to return to start of line and \033[K to clear to end of line
+	fmt.Fprintf(os.Stderr, "\r\033[KProcessing rules %3d%% |%s| %d/%d  %s",
+		percent, bar, current, total, message)
 }
 
 func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
@@ -93,8 +114,11 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	logrusAnalyzerLog.SetLevel(logrus.Level(logLevel))
 
 	// add log hook, print the rule processing to the console
-	consoleHook := &ConsoleHook{Level: logrus.InfoLevel, Log: a.log}
-	logrusAnalyzerLog.AddHook(consoleHook)
+	// but only if progress is disabled (to avoid interfering with progress bar)
+	if a.noProgress {
+		consoleHook := &ConsoleHook{Level: logrus.InfoLevel, Log: a.log}
+		logrusAnalyzerLog.AddHook(consoleHook)
+	}
 
 	analyzeLog := logrusr.New(logrusAnalyzerLog)
 
@@ -209,7 +233,84 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 
 	// This will already wait
 	a.log.Info("evaluating rules for violations. see analysis.log for more info")
-	rulesets := eng.RunRules(ctx, ruleSets, selectors...)
+
+	// Create progress reporter (or noop if disabled)
+	var reporter progress.ProgressReporter
+	var progressDone chan struct{}
+	var progressCancel context.CancelFunc
+
+	if !a.noProgress {
+		// Create channel-based progress reporter
+		var progressCtx context.Context
+		progressCtx, progressCancel = context.WithCancel(ctx)
+		defer progressCancel()
+		channelReporter := progress.NewChannelReporter(progressCtx)
+		reporter = channelReporter
+
+		// Start goroutine to consume progress events and render progress bar
+		progressDone = make(chan struct{})
+		go func() {
+			defer close(progressDone)
+
+			// Track cumulative progress across all rulesets
+			var cumulativeTotal int
+			var completedFromPreviousRulesets int
+			var lastRulesetTotal int
+
+			for event := range channelReporter.Events() {
+				switch event.Stage {
+				case progress.StageProviderInit:
+					fmt.Fprintf(os.Stderr, "Provider: %s\n", event.Message)
+				case progress.StageRuleParsing:
+					if event.Total > 0 {
+						cumulativeTotal += event.Total
+						fmt.Fprintf(os.Stderr, "Loaded %d rules\n", cumulativeTotal)
+					}
+				case progress.StageRuleExecution:
+					if event.Total > 0 {
+						// Initialize cumulativeTotal from first event if not set by rule parsing
+						if cumulativeTotal == 0 {
+							cumulativeTotal = event.Total
+							fmt.Fprintf(os.Stderr, "Loaded %d rules\n", cumulativeTotal)
+						}
+
+						// Detect if we've moved to a new ruleset
+						// This happens when event.Total changes
+						if lastRulesetTotal > 0 && event.Total != lastRulesetTotal {
+							// We've moved to a new ruleset
+							completedFromPreviousRulesets += lastRulesetTotal
+						}
+						lastRulesetTotal = event.Total
+
+						// Calculate overall progress
+						totalCompleted := completedFromPreviousRulesets + event.Current
+
+						overallPercent := (totalCompleted * 100) / cumulativeTotal
+						renderProgressBar(overallPercent, totalCompleted, cumulativeTotal, event.Message)
+					}
+				case progress.StageComplete:
+					// Move to next line and print completion (keep progress bar visible)
+					fmt.Fprintf(os.Stderr, "\n")
+					fmt.Fprintf(os.Stderr, "Analysis complete!\n")
+				}
+			}
+		}()
+	} else {
+		// Use noop reporter when progress is disabled
+		reporter = progress.NewNoopReporter()
+	}
+
+	// Run analysis with progress reporter
+	rulesets := eng.RunRulesWithOptions(ctx, ruleSets, []engine.RunOption{
+		engine.WithProgressReporter(reporter),
+	}, selectors...)
+
+	// Cancel progress context and wait for goroutine to finish
+	if !a.noProgress {
+		progressCancel()  // This closes the Events() channel
+		<-progressDone    // Wait for goroutine to finish
+	}
+
 	engineSpan.End()
 	wg.Wait()
 	if depSpan != nil {
