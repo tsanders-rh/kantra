@@ -82,6 +82,7 @@ type analyzeCommand struct {
 	cleanup                  bool
 	runLocal                 bool
 	disableMavenSearch       bool
+	noProgress               bool
 	AnalyzeCommandContext
 }
 
@@ -207,7 +208,7 @@ func NewAnalyzeCmd(log logr.Logger) *cobra.Command {
 
 				// ***** RUN CONTAINERLESS MODE *****
 				if analyzeCmd.runLocal {
-					log.Info("\n --run-local set. running analysis in containerless mode")
+					log.V(1).Info("\n --run-local set. running analysis in containerless mode")
 					if analyzeCmd.listSources || analyzeCmd.listTargets {
 						err := analyzeCmd.listLabelsContainerless(ctx)
 						if err != nil {
@@ -226,9 +227,9 @@ func NewAnalyzeCmd(log logr.Logger) *cobra.Command {
 				}
 
 				// ******* RUN CONTAINERS ******
-				log.Info("--run-local set to false. Running analysis in container mode")
+				log.V(1).Info("--run-local set to false. Running analysis in container mode")
 				if len(foundProviders) > 0 && slices.Contains(foundProviders, util.DotnetFrameworkProvider) {
-					log.Info(".Net framework provider found, running windows analysis. Otherwise, set --provider")
+					log.V(1).Info(".Net framework provider found, running windows analysis. Otherwise, set --provider")
 
 					return analyzeCmd.analyzeDotnetFramework(ctx)
 				}
@@ -342,6 +343,7 @@ func NewAnalyzeCmd(log logr.Logger) *cobra.Command {
 	analyzeCommand.Flags().StringArrayVar(&analyzeCmd.provider, "provider", []string{}, "specify which provider(s) to run")
 	analyzeCommand.Flags().BoolVar(&analyzeCmd.runLocal, "run-local", true, "run Java analysis in containerless mode")
 	analyzeCommand.Flags().BoolVar(&analyzeCmd.disableMavenSearch, "disable-maven-search", false, "disable maven search for dependencies")
+	analyzeCommand.Flags().BoolVar(&analyzeCmd.noProgress, "no-progress", false, "disable progress reporting (useful for scripting)")
 	return analyzeCommand
 }
 

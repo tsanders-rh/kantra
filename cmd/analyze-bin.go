@@ -953,7 +953,7 @@ func (a *analyzeCommand) GenerateStaticReportContainerless(ctx context.Context) 
 	// in this case we still want to generate a static report for successful source analysis
 	_, noDepFileErr := os.Stat(filepath.Join(a.output, "dependencies.yaml"))
 	if errors.Is(noDepFileErr, os.ErrNotExist) {
-		a.log.Info("unable to get dependency output in static report. generating static report from source analysis only")
+		a.log.V(1).Info("unable to get dependency output in static report. generating static report from source analysis only")
 
 		// some other err
 	} else if noDepFileErr != nil && !errors.Is(noDepFileErr, os.ErrNotExist) {
