@@ -47,6 +47,77 @@ type ProviderInit struct {
 	provider      kantraProvider.Provider
 }
 
+// filteringWriter filters out INFO log lines while writing to both a log file and stderr
+type filteringWriter struct {
+	logFile io.Writer
+	stderr  io.Writer
+	buffer  []byte
+}
+
+func newFilteringWriter(logFile io.Writer, stderr io.Writer) *filteringWriter {
+	return &filteringWriter{
+		logFile: logFile,
+		stderr:  stderr,
+		buffer:  make([]byte, 0, 4096),
+	}
+}
+
+func (w *filteringWriter) Write(p []byte) (n int, err error) {
+	// Write everything to log file
+	if w.logFile != nil {
+		w.logFile.Write(p)
+	}
+
+	// For progress bars that use \r for in-place updates,
+	// pass through immediately without line buffering.
+	// Progress bar updates contain \r but typically not \n (until completion).
+	if bytes.Contains(p, []byte("\r")) && !bytes.Contains(p, []byte("\n")) {
+		// This is a progress bar update, pass through immediately
+		if w.stderr != nil {
+			w.stderr.Write(p)
+		}
+		return len(p), nil
+	}
+
+	// Buffer the input and process line by line for stderr
+	w.buffer = append(w.buffer, p...)
+
+	// Process complete lines
+	for {
+		lineEnd := bytes.IndexByte(w.buffer, '\n')
+		if lineEnd == -1 {
+			// No complete line yet, wait for more data
+			break
+		}
+
+		line := w.buffer[:lineEnd+1]
+		w.buffer = w.buffer[lineEnd+1:]
+
+		// Filter out INFO log lines
+		// INFO logs look like: time="2025-10-31T13:29:37Z" level=info msg="..."
+		lineStr := string(line)
+		if !strings.Contains(lineStr, "level=info") && !strings.Contains(lineStr, "level=\"info\"") {
+			// Pass through non-INFO lines (including progress bar)
+			if w.stderr != nil {
+				w.stderr.Write(line)
+			}
+		}
+	}
+
+	return len(p), nil
+}
+
+func (w *filteringWriter) Flush() {
+	// Flush any remaining buffered data
+	if len(w.buffer) > 0 && w.stderr != nil {
+		lineStr := string(w.buffer)
+		if !strings.Contains(lineStr, "level=info") && !strings.Contains(lineStr, "level=\"info\"") {
+			w.stderr.Write(w.buffer)
+		}
+		w.buffer = w.buffer[:0]
+	}
+}
+
 // kantra analyze flags
 type analyzeCommand struct {
 	listSources              bool
@@ -946,7 +1017,7 @@ func (a *analyzeCommand) RunProviders(ctx context.Context, networkName string, v
 		// we have to start the fist provider separately to create the shared
 		// container network to then add other providers to the network
 		if !firstProvRun {
-			a.log.Info("starting first provider", "provider", prov)
+			a.log.V(1).Info("starting first provider", "provider", prov)
 			con := container.NewContainer()
 			err := con.Run(
 				ctx,
@@ -972,7 +1043,7 @@ func (a *analyzeCommand) RunProviders(ctx context.Context, networkName string, v
 		}
 		// start additional providers
 		if firstProvRun && len(a.providersMap) > 1 {
-			a.log.Info("starting provider", "provider", prov)
+			a.log.V(1).Info("starting provider", "provider", prov)
 			con := container.NewContainer()
 			err := con.Run(
 				ctx,
@@ -1056,8 +1127,15 @@ func (a *analyzeCommand) RunAnalysisOverrideProviderSettings(ctx context.Context
 		args = append(args, fmt.Sprintf("--label-selector=%s", labelSelector))
 	}
 	if a.mode == string(provider.FullAnalysisMode) {
-		a.log.Info("running dependency retrieval during analysis")
+		a.log.V(1).Info("running dependency retrieval during analysis")
 		args = append(args, fmt.Sprintf("--dep-output-file=%s", util.DepsOutputMountPath))
+	}
+
+	// Add progress reporting for containerized mode
+	if !a.noProgress {
+		args = append(args,
+			"--progress-output=stderr",
+			"--progress-format=bar")
 	}
 
 	analysisLogFilePath := filepath.Join(a.output, "analysis.log")
@@ -1068,10 +1146,14 @@ func (a *analyzeCommand) RunAnalysisOverrideProviderSettings(ctx context.Context
 	}
 	defer analysisLog.Close()
 
-	a.log.Info("running source code analysis", "log", analysisLogFilePath,
+	a.log.V(1).Info("running source code analysis", "log", analysisLogFilePath,
 		"input", a.input, "output", a.output, "args", strings.Join(args, " "), "volumes", volumes)
-	a.log.Info("generating analysis log in file", "file", analysisLogFilePath)
-	// TODO (pgaikwad): run analysis & deps in parallel
+
+	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+
+	// Create filtering writer for container output
+	filteredStderr := newFilteringWriter(analysisLog, os.Stderr)
+	defer filteredStderr.Flush()
 
 	c := container.NewContainer()
 	err = c.Run(
@@ -1080,7 +1162,7 @@ func (a *analyzeCommand) RunAnalysisOverrideProviderSettings(ctx context.Context
 		container.WithLog(a.log.V(1)),
 		container.WithVolumes(volumes),
 		container.WithStdout(analysisLog),
-		container.WithStderr(analysisLog),
+		container.WithStderr(filteredStderr),
 		container.WithEntrypointArgs(args...),
 		container.WithName(fmt.Sprintf("analyzer-%v", container.RandomName())),
 		container.WithEntrypointBin("/usr/local/bin/konveyor-analyzer"),
@@ -1167,8 +1249,15 @@ func (a *analyzeCommand) RunAnalysis(ctx context.Context, volName string) error 
 			args = append(args,
 				fmt.Sprintf("--dep-label-selector=(!%s=open-source)", provider.DepSourceLabel))
 		}
-		a.log.Info("running dependency retrieval during analysis")
+		a.log.V(1).Info("running dependency retrieval during analysis")
 		args = append(args, fmt.Sprintf("--dep-output-file=%s", util.DepsOutputMountPath))
+	}
+
+	// Add progress reporting for containerized mode
+	if !a.noProgress {
+		args = append(args,
+			"--progress-output=stderr",
+			"--progress-format=bar")
 	}
 
 	analysisLogFilePath := filepath.Join(a.output, "analysis.log")
@@ -1191,14 +1280,19 @@ func (a *analyzeCommand) RunAnalysis(ctx context.Context, volName string) error 
 	} else {
 		networkName = "none"
 	}
+
+	// Create filtering writer for container output
+	filteredStderr := newFilteringWriter(analysisLog, os.Stderr)
+	defer filteredStderr.Flush()
+
 	c := container.NewContainer()
 	err = c.Run(
 		ctx,
 		container.WithImage(Settings.RunnerImage),
 		container.WithLog(a.log.V(1)),
 		container.WithVolumes(volumes),
-		container.WithStdout(analysisLog, os.Stderr),
-		container.WithStderr(analysisLog, os.Stderr),
+		container.WithStdout(analysisLog),
+		container.WithStderr(filteredStderr),
 		container.WithName(fmt.Sprintf("analyzer-%v", container.RandomName())),
 		container.WithEntrypointArgs(args...),
 		container.WithEntrypointBin("/usr/local/bin/konveyor-analyzer"),
@@ -1838,6 +1932,10 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 
 	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
 
+	// Create filtering writer for container output
+	filteredStderr := newFilteringWriter(analysisLog, os.Stderr)
+	defer filteredStderr.Flush()
+
 	c := container.NewContainer()
 	err = c.Run(
 		ctx,
@@ -1845,8 +1943,8 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 		container.WithLog(a.log.V(1)),
 		container.WithVolumes(volumes),
 		container.WithName(fmt.Sprintf("analyzer-%v", container.RandomName())),
-		container.WithStdout(analysisLog, os.Stderr),
-		container.WithStderr(analysisLog, os.Stderr),
+		container.WithStdout(analysisLog),
+		container.WithStderr(filteredStderr),
 		container.WithEntrypointArgs(args...),
 		container.WithEntrypointBin(`C:\app\konveyor-analyzer.exe`),
 		container.WithNetwork(networkName),
