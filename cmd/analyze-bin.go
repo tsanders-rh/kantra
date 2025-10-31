@@ -256,11 +256,12 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 			var cumulativeTotal int
 			var completedFromPreviousRulesets int
 			var lastRulesetTotal int
+			var cursorHidden bool
 
 			for event := range channelReporter.Events() {
 				switch event.Stage {
 				case progress.StageProviderInit:
-					fmt.Fprintf(os.Stderr, "Provider: %s\n", event.Message)
+					fmt.Fprintf(os.Stderr, "Initializing %s provider...\n", event.Message)
 				case progress.StageRuleParsing:
 					if event.Total > 0 {
 						cumulativeTotal += event.Total
@@ -272,6 +273,12 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 						if cumulativeTotal == 0 {
 							cumulativeTotal = event.Total
 							fmt.Fprintf(os.Stderr, "Loaded %d rules\n", cumulativeTotal)
+						}
+
+						// Hide cursor before first progress bar render
+						if !cursorHidden {
+							fmt.Fprintf(os.Stderr, "\033[?25l") // Hide cursor
+							cursorHidden = true
 						}
 
 						// Detect if we've moved to a new ruleset
@@ -289,8 +296,8 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 						renderProgressBar(overallPercent, totalCompleted, cumulativeTotal, event.Message)
 					}
 				case progress.StageComplete:
-					// Move to next line and print completion (keep progress bar visible)
-					fmt.Fprintf(os.Stderr, "\n")
+					// Show cursor, move to next line and print completion
+					fmt.Fprintf(os.Stderr, "\033[?25h\n") // Show cursor and newline
 					fmt.Fprintf(os.Stderr, "Analysis complete!\n")
 				}
 			}
