@@ -127,7 +127,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	logrusErrLog.SetOutput(os.Stderr)
 	errLog := logrusr.New(logrusErrLog)
 
-	a.log.Info("running source analysis")
+	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
 	labelSelectors := a.getLabelSelector()
 
 	selectors := []engine.RuleSelector{}
@@ -206,8 +206,9 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 		a.rules = append(a.rules, filepath.Join(a.kantraDir, RulesetsLocation))
 	}
 
+	fmt.Fprintf(os.Stderr, "Starting Rules Engine...\n")
 	for _, f := range a.rules {
-		a.log.Info("parsing rules for analysis", "rules", f)
+		a.log.V(1).Info("parsing rules for analysis", "rules", f)
 
 		internRuleSet, internNeedProviders, err := parser.LoadRules(f)
 		if err != nil {
@@ -227,13 +228,11 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 		depCtx, depSpan = tracing.StartNewSpan(ctx, "dep")
 		wg.Add(1)
 
-		a.log.Info("running depencency analysis")
+		a.log.V(1).Info("running dependency analysis")
 		go a.DependencyOutputContainerless(depCtx, providers, "dependencies.yaml", wg)
 	}
 
 	// This will already wait
-	a.log.Info("evaluating rules for violations. see analysis.log for more info")
-
 	// Create progress reporter (or noop if disabled)
 	var reporter progress.ProgressReporter
 	var progressDone chan struct{}
@@ -334,7 +333,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	})
 
 	// Write results out to CLI
-	a.log.Info("writing analysis results to output", "output", a.output)
+	a.log.V(1).Info("writing analysis results to output", "output", a.output)
 	b, err := yaml.Marshal(rulesets)
 	if err != nil {
 		return err
@@ -657,7 +656,7 @@ func (a *analyzeCommand) setConfigsContainerless(configs []provider.Config) []pr
 }
 
 func (a *analyzeCommand) setBuiltinProvider(config provider.Config, analysisLog logr.Logger) (provider.InternalProviderClient, error) {
-	a.log.Info("setting provider from provider config", "provider", config.Name)
+	a.log.V(1).Info("setting provider from provider config", "provider", config.Name)
 	config.ContextLines = a.contextLines
 
 	// IF analysis mode is set from the CLI, then we will override this for each init config
@@ -680,7 +679,7 @@ func (a *analyzeCommand) setBuiltinProvider(config provider.Config, analysisLog 
 }
 
 func (a *analyzeCommand) setJavaProvider(config provider.Config, analysisLog logr.Logger) provider.InternalProviderClient {
-	a.log.Info("setting provider from provider config", "provider", config.Name)
+	a.log.V(1).Info("setting provider from provider config", "provider", config.Name)
 	config.ContextLines = a.contextLines
 
 	// If analysis mode is set from the CLI, then we will override this for each init config
@@ -715,7 +714,8 @@ func (a *analyzeCommand) setupJavaProvider(ctx context.Context, analysisLog logr
 
 	javaProvider := a.setJavaProvider(javaConfig, analysisLog)
 
-	a.log.Info("starting provider", "provider", util.JavaProvider)
+	fmt.Fprintf(os.Stderr, "Initializing %s provider...\n", util.JavaProvider)
+	a.log.V(1).Info("starting provider", "provider", util.JavaProvider)
 	initCtx, initSpan := tracing.StartNewSpan(ctx, "init",
 		attribute.Key("provider").String(util.JavaProvider))
 	additionalBuiltinConfs, err := javaProvider.ProviderInit(initCtx, nil)
@@ -730,7 +730,7 @@ func (a *analyzeCommand) setupJavaProvider(ctx context.Context, analysisLog logr
 }
 
 func (a *analyzeCommand) setupBuiltinProvider(ctx context.Context, excludedTargetPaths []interface{}, additionalConfigs []provider.InitConfig, analysisLog logr.Logger) (provider.InternalProviderClient, []string, error) {
-	a.log.Info("setting up builtin provider")
+	a.log.V(1).Info("setting up builtin provider")
 	builtinConfig := a.makeBuiltinProviderConfig(excludedTargetPaths)
 
 	// Set proxy if configured
@@ -754,7 +754,8 @@ func (a *analyzeCommand) setupBuiltinProvider(ctx context.Context, excludedTarge
 		return nil, nil, err
 	}
 
-	a.log.Info("starting provider", "provider", "builtin")
+	fmt.Fprintf(os.Stderr, "Initializing builtin provider...\n")
+	a.log.V(1).Info("starting provider", "provider", "builtin")
 	if _, err := builtinProvider.ProviderInit(ctx, additionalConfigs); err != nil {
 		a.log.Error(err, "unable to init the builtin provider")
 		return nil, nil, err
@@ -793,7 +794,7 @@ func (a *analyzeCommand) startProvidersContainerless(ctx context.Context, needPr
 	// Now that we have all the providers, we need to start them.
 	additionalBuiltinConfigs := []provider.InitConfig{}
 	for name, provider := range needProviders {
-		a.log.Info("starting provider", "provider", name)
+		a.log.V(1).Info("starting provider", "provider", name)
 		switch name {
 		// other providers can return additional configs for the builtin provider
 		// therefore, we initiate builtin provider separately at the end
@@ -941,7 +942,7 @@ func (a *analyzeCommand) GenerateStaticReportContainerless(ctx context.Context) 
 	if a.skipStaticReport {
 		return nil
 	}
-	a.log.Info("generating static report")
+	a.log.V(1).Info("generating static report")
 	staticReportLogFilePath := filepath.Join(a.output, "static-report.log")
 	staticReportLog, err := os.Create(staticReportLogFilePath)
 	if err != nil {
@@ -974,7 +975,7 @@ func (a *analyzeCommand) GenerateStaticReportContainerless(ctx context.Context) 
 		return err
 	}
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	a.log.Info("Static report created. Access it at this URL:", "URL", string(uri))
+	fmt.Fprintf(os.Stderr, "\nStatic report created. Access it at this URL:\n  %s\n", string(uri))
 
 	return nil
 }
