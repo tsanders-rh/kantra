@@ -158,6 +158,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 
 	providers := map[string]provider.InternalProviderClient{}
 	providerLocations := []string{}
+	providerNames := []string{}
 
 	javaProvider, javaLocations, additionalBuiltinConfigs, err := a.setupJavaProvider(ctx, analyzeLog)
 	if err != nil {
@@ -165,6 +166,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 		os.Exit(1)
 	}
 	providers[util.JavaProvider] = javaProvider
+	providerNames = append(providerNames, util.JavaProvider)
 	providerLocations = append(providerLocations, javaLocations...)
 
 	//scopes := []engine.Scope{}
@@ -180,7 +182,10 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 		os.Exit(1)
 	}
 	providers["builtin"] = builtinProvider
+	providerNames = append(providerNames, "builtin")
 	providerLocations = append(providerLocations, builtinLocations...)
+
+	fmt.Fprintf(os.Stderr, "Initializing providers (%s)...\n", strings.Join(providerNames, ", "))
 
 	engineCtx, engineSpan := tracing.StartNewSpan(ctx, "rule-engine")
 	//start up the rule eng
@@ -206,7 +211,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 		a.rules = append(a.rules, filepath.Join(a.kantraDir, RulesetsLocation))
 	}
 
-	fmt.Fprintf(os.Stderr, "Starting Rules Engine...\n")
+	fmt.Fprintf(os.Stderr, "Starting rules engine...\n")
 	for _, f := range a.rules {
 		a.log.V(1).Info("parsing rules for analysis", "rules", f)
 
@@ -714,7 +719,6 @@ func (a *analyzeCommand) setupJavaProvider(ctx context.Context, analysisLog logr
 
 	javaProvider := a.setJavaProvider(javaConfig, analysisLog)
 
-	fmt.Fprintf(os.Stderr, "Initializing %s provider...\n", util.JavaProvider)
 	a.log.V(1).Info("starting provider", "provider", util.JavaProvider)
 	initCtx, initSpan := tracing.StartNewSpan(ctx, "init",
 		attribute.Key("provider").String(util.JavaProvider))
@@ -754,7 +758,6 @@ func (a *analyzeCommand) setupBuiltinProvider(ctx context.Context, excludedTarge
 		return nil, nil, err
 	}
 
-	fmt.Fprintf(os.Stderr, "Initializing builtin provider...\n")
 	a.log.V(1).Info("starting provider", "provider", "builtin")
 	if _, err := builtinProvider.ProviderInit(ctx, additionalConfigs); err != nil {
 		a.log.Error(err, "unable to init the builtin provider")
