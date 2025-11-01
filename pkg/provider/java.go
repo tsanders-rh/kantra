@@ -131,7 +131,7 @@ func WaitForTargetDir(log logr.Logger, path string) error {
 	if _, err := os.Stat(filepath.Join(path, "target")); err == nil {
 		return nil
 	}
-	log.Info("waiting for target directory in decompiled Java project")
+	log.V(1).Info("waiting for target directory in decompiled Java project")
 
 	for {
 		select {
@@ -139,7 +139,7 @@ func WaitForTargetDir(log logr.Logger, path string) error {
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				info, err := os.Stat(event.Name)
 				if err == nil && info.IsDir() && event.Name == filepath.Join(path, "target") {
-					log.Info("target sub-folder detected:", "folder", event.Name)
+					log.V(1).Info("target sub-folder detected:", "folder", event.Name)
 					return nil
 				}
 			}

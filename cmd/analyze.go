@@ -1149,7 +1149,11 @@ func (a *analyzeCommand) RunAnalysisOverrideProviderSettings(ctx context.Context
 	a.log.V(1).Info("running source code analysis", "log", analysisLogFilePath,
 		"input", a.input, "output", a.output, "args", strings.Join(args, " "), "volumes", volumes)
 
-	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	if a.isFileInput {
+		fmt.Fprintf(os.Stderr, "Running binary analysis...\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	}
 
 	// Create filtering writer for container output
 	filteredStderr := newFilteringWriter(analysisLog, os.Stderr)
@@ -1271,7 +1275,11 @@ func (a *analyzeCommand) RunAnalysis(ctx context.Context, volName string) error 
 	a.log.V(1).Info("running source code analysis", "log", analysisLogFilePath,
 		"input", a.input, "output", a.output, "args", strings.Join(args, " "), "volumes", volumes)
 
-	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	if a.isFileInput {
+		fmt.Fprintf(os.Stderr, "Running binary analysis...\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	}
 
 	var networkName string
 	if !a.needsBuiltin {
@@ -1474,10 +1482,11 @@ func (a *analyzeCommand) GenerateStaticReport(ctx context.Context) error {
 	}
 
 	analysisLogPath := filepath.Join(a.output, "analysis.log")
-	fmt.Fprintf(os.Stderr, "\nDetailed logs: %s\n", analysisLogPath)
-
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	fmt.Fprintf(os.Stderr, "Static report created. Access it at this URL:\n  %s\n", string(uri))
+
+	fmt.Fprintf(os.Stderr, "\nResults:\n")
+	fmt.Fprintf(os.Stderr, "  Report: %s\n", string(uri))
+	fmt.Fprintf(os.Stderr, "  Logs:   %s\n", analysisLogPath)
 
 	return nil
 }
@@ -1930,7 +1939,11 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 	a.log.V(1).Info("running source code analysis", "log", analysisLogFilePath,
 		"input", a.input, "output", a.output, "args", strings.Join(args, " "), "volumes", volumes)
 
-	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	if a.isFileInput {
+		fmt.Fprintf(os.Stderr, "Running binary analysis...\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+	}
 
 	// Create filtering writer for container output
 	filteredStderr := newFilteringWriter(analysisLog, os.Stderr)
@@ -2010,10 +2023,11 @@ func (a *analyzeCommand) analyzeDotnetFramework(ctx context.Context) error {
 	}
 
 	analysisLogPath := filepath.Join(a.output, "analysis.log")
-	fmt.Fprintf(os.Stderr, "\nDetailed logs: %s\n", analysisLogPath)
-
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	fmt.Fprintf(os.Stderr, "Static report created. Access it at this URL:\n  %s\n", string(uri))
+
+	fmt.Fprintf(os.Stderr, "\nResults:\n")
+	fmt.Fprintf(os.Stderr, "  Report: %s\n", string(uri))
+	fmt.Fprintf(os.Stderr, "  Logs:   %s\n", analysisLogPath)
 
 	return nil
 }

@@ -127,8 +127,13 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	logrusErrLog.SetOutput(os.Stderr)
 	errLog := logrusr.New(logrusErrLog)
 
-	fmt.Fprintf(os.Stderr, "Running source analysis...\n")
-	analyzeLog.Info("running source analysis")
+	if a.isFileInput {
+		fmt.Fprintf(os.Stderr, "Running binary analysis...\n")
+		analyzeLog.Info("running binary analysis")
+	} else {
+		fmt.Fprintf(os.Stderr, "Running source analysis...\n")
+		analyzeLog.Info("running source analysis")
+	}
 	labelSelectors := a.getLabelSelector()
 
 	selectors := []engine.RuleSelector{}
@@ -170,6 +175,11 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	providerNames = append(providerNames, util.JavaProvider)
 	providerLocations = append(providerLocations, javaLocations...)
 
+	// Print decompilation success message for binaries
+	if a.isFileInput {
+		fmt.Fprintf(os.Stderr, "  ✓ Decompiled java project\n")
+	}
+
 	//scopes := []engine.Scope{}
 	javaTargetPaths, err := kantraProvider.WalkJavaPathForTarget(a.log, a.isFileInput, a.input)
 	if err != nil {
@@ -186,7 +196,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 	providerNames = append(providerNames, "builtin")
 	providerLocations = append(providerLocations, builtinLocations...)
 
-	fmt.Fprintf(os.Stderr, "Initializing providers (%s)...\n", strings.Join(providerNames, ", "))
+	fmt.Fprintf(os.Stderr, "  ✓ Initialized providers (%s)\n", strings.Join(providerNames, ", "))
 
 	engineCtx, engineSpan := tracing.StartNewSpan(ctx, "rule-engine")
 	//start up the rule eng
@@ -212,7 +222,11 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 		a.rules = append(a.rules, filepath.Join(a.kantraDir, RulesetsLocation))
 	}
 
-	fmt.Fprintf(os.Stderr, "Starting rules engine...\n")
+	fmt.Fprintf(os.Stderr, "  ✓ Started rules engine\n")
+	// Hide cursor immediately if progress is enabled to avoid ghost cursor
+	if !a.noProgress {
+		fmt.Fprintf(os.Stderr, "\033[?25l")
+	}
 	for _, f := range a.rules {
 		a.log.V(1).Info("parsing rules for analysis", "rules", f)
 
@@ -261,29 +275,23 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 			var cumulativeTotal int
 			var completedFromPreviousRulesets int
 			var lastRulesetTotal int
-			var cursorHidden bool
 
 			for event := range channelReporter.Events() {
 				switch event.Stage {
 				case progress.StageProviderInit:
 					fmt.Fprintf(os.Stderr, "Initializing %s provider...\n", event.Message)
 				case progress.StageRuleParsing:
+					// When we have the total, print summary
 					if event.Total > 0 {
 						cumulativeTotal += event.Total
-						fmt.Fprintf(os.Stderr, "Loaded %d rules\n", cumulativeTotal)
+						fmt.Fprintf(os.Stderr, "  ✓ Loaded %d rules\n\n", cumulativeTotal)
 					}
 				case progress.StageRuleExecution:
 					if event.Total > 0 {
 						// Initialize cumulativeTotal from first event if not set by rule parsing
 						if cumulativeTotal == 0 {
 							cumulativeTotal = event.Total
-							fmt.Fprintf(os.Stderr, "Loaded %d rules\n", cumulativeTotal)
-						}
-
-						// Hide cursor before first progress bar render
-						if !cursorHidden {
-							fmt.Fprintf(os.Stderr, "\033[?25l") // Hide cursor
-							cursorHidden = true
+							fmt.Fprintf(os.Stderr, "  ✓ Loaded %d rules\n\n", cumulativeTotal)
 						}
 
 						// Detect if we've moved to a new ruleset
@@ -303,7 +311,7 @@ func (a *analyzeCommand) RunAnalysisContainerless(ctx context.Context) error {
 				case progress.StageComplete:
 					// Show cursor, move to next line and print completion
 					fmt.Fprintf(os.Stderr, "\033[?25h\n") // Show cursor and newline
-					fmt.Fprintf(os.Stderr, "Analysis complete!\n")
+					fmt.Fprintf(os.Stderr, "\nAnalysis complete!\n")
 				}
 			}
 		}()
@@ -978,11 +986,13 @@ func (a *analyzeCommand) GenerateStaticReportContainerless(ctx context.Context) 
 	if err != nil {
 		return err
 	}
-	analysisLogPath := filepath.Join(a.output, "analysis.log")
-	fmt.Fprintf(os.Stderr, "\nDetailed logs: %s\n", analysisLogPath)
 
+	analysisLogPath := filepath.Join(a.output, "analysis.log")
 	uri := uri.File(filepath.Join(a.output, "static-report", "index.html"))
-	fmt.Fprintf(os.Stderr, "Static report created. Access it at this URL:\n  %s\n", string(uri))
+
+	fmt.Fprintf(os.Stderr, "\nResults:\n")
+	fmt.Fprintf(os.Stderr, "  Report: %s\n", string(uri))
+	fmt.Fprintf(os.Stderr, "  Logs:   %s\n", analysisLogPath)
 
 	return nil
 }
